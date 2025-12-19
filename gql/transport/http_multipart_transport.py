@@ -228,9 +228,11 @@ class HTTPMultipartTransport(AsyncTransport):
                 # No more parts
                 break
 
-            # Skip nested multipart (not expected in GraphQL subscriptions)
+            # Nested multipart is not expected in GraphQL subscriptions
             if isinstance(part, aiohttp.MultipartReader):
-                continue
+                raise TransportProtocolError(
+                    "Received unexpected nested multipart part in GraphQL subscription response."
+                )
 
             result = await self._parse_multipart_part(part)
             if result:

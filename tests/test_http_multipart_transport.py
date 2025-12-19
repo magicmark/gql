@@ -2,6 +2,7 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, patch
 
+import aiohttp
 import pytest
 from aiohttp import web
 
@@ -689,3 +690,49 @@ async def test_http_multipart_with_content_length_headers(multipart_server):
         assert len(results) == 2
         assert results[0]["book"]["title"] == "Book 1"
         assert results[1]["book"]["title"] == "Book 2"
+
+
+@pytest.mark.asyncio
+async def test_http_multipart_nested_multipart_error():
+    """Test that nested multipart parts raise TransportProtocolError."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from gql.transport.http_multipart_transport import HTTPMultipartTransport
+
+    # Create a mock response
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.headers = {
+        "Content-Type": (
+            "multipart/mixed;boundary=graphql;subscriptionSpec=1.0,application/json"
+        )
+    }
+
+    # Create a mock multipart reader that returns a nested MultipartReader
+    nested_reader = MagicMock(spec=aiohttp.MultipartReader)
+    mock_reader = MagicMock()
+    mock_reader.next = AsyncMock(side_effect=[nested_reader, None])
+    mock_reader.at_eof = MagicMock(return_value=False)
+
+    transport = HTTPMultipartTransport(url="http://test.local/graphql")
+
+    await transport.connect()
+
+    query = gql(subscription_str)
+
+    try:
+        with patch("aiohttp.MultipartReader.from_response", return_value=mock_reader):
+            with patch.object(
+                transport.session, "post"
+            ) as mock_post:
+                mock_post.return_value.__aenter__.return_value = mock_response
+
+                with pytest.raises(TransportProtocolError) as exc_info:
+                    async for result in transport.subscribe(
+                        GraphQLRequest(query)
+                    ):
+                        pass
+
+                assert "nested multipart" in str(exc_info.value).lower()
+    finally:
+        await transport.close()
