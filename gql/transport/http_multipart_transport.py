@@ -303,10 +303,11 @@ class HTTPMultipartTransport(AsyncTransport):
                 errors=payload.get("errors"),
                 extensions=payload.get("extensions"),
             )
+        except UnicodeDecodeError as e:
+            log.warning(f"Skipping part - failed to decode as UTF-8: {e}")
+            return None
         except json.JSONDecodeError as e:
-            log.warning(
-                f"Failed to parse JSON: {e}, body: {body[:100] if body else ''}"
-            )
+            log.warning(f"Skipping part - failed to parse JSON: {e}")
             return None
 
     async def execute(
