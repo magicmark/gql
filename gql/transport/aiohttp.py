@@ -98,6 +98,7 @@ class AIOHTTPTransport(AsyncTransport):
         self.ssl_close_timeout: Optional[Union[int, float]] = ssl_close_timeout
         self.client_session_args = client_session_args
         self.session: Optional[aiohttp.ClientSession] = None
+        self._connect_count: int = 0
         self.response_headers: Optional[CIMultiDictProxy[str]]
         self.json_serialize: Callable = json_serialize
         self.json_deserialize: Callable = json_deserialize
@@ -110,6 +111,10 @@ class AIOHTTPTransport(AsyncTransport):
         to create the session.
 
         Should be cleaned with a call to the close coroutine.
+
+        This method is reentrant: if the session already exists, the existing
+        session is reused and a reference count is incremented. Each connect()
+        call must be paired with a close() call.
         """
 
         if self.session is None:
@@ -136,8 +141,7 @@ class AIOHTTPTransport(AsyncTransport):
 
             self.session = aiohttp.ClientSession(**client_session_args)
 
-        else:
-            raise TransportAlreadyConnected("Transport is already connected")
+        self._connect_count += 1
 
     async def close(self) -> None:
         """Coroutine which will close the aiohttp session.
@@ -145,7 +149,15 @@ class AIOHTTPTransport(AsyncTransport):
         Don't call this coroutine directly on the transport, instead use
         :code:`async with` on the client and this coroutine will be executed
         when you exit the async context manager.
+
+        The session is only actually closed when every connect() call has been
+        balanced by a close() call.
         """
+        self._connect_count = max(0, self._connect_count - 1)
+
+        if self._connect_count > 0:
+            return
+
         if self.session is not None:
 
             log.debug("Closing transport")

@@ -392,7 +392,7 @@ async def test_aiohttp_invalid_protocol(aiohttp_server, param):
 
 
 @pytest.mark.asyncio
-async def test_aiohttp_cannot_connect_twice(aiohttp_server):
+async def test_aiohttp_connect_twice_is_reentrant(aiohttp_server):
     from aiohttp import web
 
     from gql.transport.aiohttp import AIOHTTPTransport
@@ -409,9 +409,12 @@ async def test_aiohttp_cannot_connect_twice(aiohttp_server):
     transport = AIOHTTPTransport(url=url, timeout=10)
 
     async with Client(transport=transport) as session:
-
-        with pytest.raises(TransportAlreadyConnected):
-            await session.transport.connect()
+        # Second connect should succeed (reentrant) and reuse the session
+        original_session = session.transport.session
+        await session.transport.connect()
+        assert session.transport.session is original_session
+        # Balance the extra connect with a close
+        await session.transport.close()
 
 
 @pytest.mark.asyncio
@@ -1922,9 +1925,6 @@ async def test_aiohttp_type_error_execute(aiohttp_server):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason="transport.connect() is not reentrant — shared client fails on concurrent use"
-)
 async def test_aiohttp_reentrant_connect(aiohttp_server):
     """A single Client/transport instance should support concurrent sessions.
 
