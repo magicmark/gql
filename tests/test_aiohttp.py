@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import os
@@ -1918,3 +1919,41 @@ async def test_aiohttp_type_error_execute(aiohttp_server):
             await session.execute("qmlsdkfj")
 
         assert "request should be a GraphQLRequest object" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    reason="transport.connect() is not reentrant — shared client fails on concurrent use"
+)
+async def test_aiohttp_reentrant_connect(aiohttp_server):
+    """A single Client/transport instance should support concurrent sessions.
+
+    When a Client is cached (e.g. via lru_cache) and used from multiple
+    concurrent async-with blocks, the second caller should not get
+    TransportAlreadyConnected.
+    """
+    from aiohttp import web
+
+    from gql.transport.aiohttp import AIOHTTPTransport
+
+    async def handler(request):
+        return web.Response(text=query1_server_answer, content_type="application/json")
+
+    app = web.Application()
+    app.router.add_route("POST", "/", handler)
+    server = await aiohttp_server(app)
+
+    url = server.make_url("/")
+
+    transport = AIOHTTPTransport(url=url, timeout=10)
+    client = Client(transport=transport)
+
+    results = []
+
+    async def use_client():
+        async with client as session:
+            query = gql(query1_str)
+            result = await session.execute(query)
+            results.append(result)
+
+    await asyncio.gather(use_client(), use_client())
